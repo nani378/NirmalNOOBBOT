@@ -229,6 +229,9 @@ def run_conversation(emotion: str, groq_client: Groq,
             # Back-and-forth conversation
             history: list = []
             for turn in range(CONVERSATION_LIMIT):
+                print(f"\n{'='*60}")
+                print(f"  Turn {turn + 1} of {CONVERSATION_LIMIT}  |  Emotion: {emotion.upper()}")
+                print(f"{'='*60}")
                 user_text = listen(groq_client, WHISPER_MODEL,
                                    LISTEN_TIMEOUT, PHRASE_TIME_LIMIT)
                 if not user_text:

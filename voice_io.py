@@ -23,36 +23,50 @@ import speech_recognition as sr
 
 IS_WINDOWS = platform.system() == "Windows"
 
+# ── Mic index cache ───────────────────────────────────────────────────────────
+# Scanned once at first listen() call so we don't enumerate devices every turn.
+_webcam_mic_index: int | None = None
+_mic_scanned: bool = False
+
 
 def _find_webcam_mic() -> int | None:
-    """Scan microphone list and return the index of the webcam's built-in mic.
+    """Scan microphone list once and return the index of the USB webcam's mic.
 
-    Matches names containing 'camera', 'webcam', 'usb', 'video', or 'cam'.
-    Returns None if not found, which makes sr.Microphone() fall back to the
-    system default.
+    Searches for names containing 'camera', 'webcam', 'usb', 'video', or 'cam'.
+    Result is cached — the scan only runs on the very first call.
+    Returns None if not found, causing sr.Microphone() to use the system default.
     """
+    global _webcam_mic_index, _mic_scanned
+    if _mic_scanned:                          # already scanned — return cached result
+        return _webcam_mic_index
+
     keywords = ["camera", "webcam", "usb", "video", "cam"]
     try:
         names = sr.Microphone.list_microphone_names()
-        print("[MIC] Available microphones:")
+        print("[MIC] Scanning available microphones:")
         for i, name in enumerate(names):
-            print(f"       [{i}] {name}")
+            print(f"        [{i}] {name}")
         for i, name in enumerate(names):
             if any(kw in name.lower() for kw in keywords):
-                print(f"[MIC] Selected webcam mic: [{i}] {name}")
-                return i
+                print(f"[MIC] ✓ Auto-selected USB webcam mic  → [{i}] {name}")
+                _webcam_mic_index = i
+                break
+        if _webcam_mic_index is None:
+            print("[MIC] No USB webcam mic found — using system default")
     except Exception as e:
-        print(f"[MIC] Could not list microphones: {e}")
-    print("[MIC] No webcam mic found — using system default")
-    return None
+        print(f"[MIC] Could not enumerate microphones: {e}")
+
+    _mic_scanned = True
+    return _webcam_mic_index
 
 
 def speak(text: str, rate: int = 145) -> None:
     """
-    Speak text synchronously.
+    Speak text synchronously and print it to the terminal.
     Safe to call from any thread on both Windows and Linux/Pi.
     """
-    print(f"[AI]  {text}")
+    print(f"\n[BOT REPLY] {text}")
+    print("-" * 60)
     if IS_WINDOWS:
         import pyttsx3
         # Create a fresh engine instance — required for thread safety on Windows
@@ -84,15 +98,17 @@ def listen(groq_client, whisper_model: str,
     mic_index = None if IS_WINDOWS else _find_webcam_mic()
     try:
         with sr.Microphone(device_index=mic_index) as source:
-            print("[LISTEN] Listening… speak now")
+            print("\n[LISTENING] Adjusting for ambient noise…")
             recognizer.adjust_for_ambient_noise(source, duration=0.4)
+            print(f"[LISTENING] *** Speak now  (up to {phrase_limit}s) ***")
             audio = recognizer.listen(
                 source,
                 timeout=timeout,
                 phrase_time_limit=phrase_limit,
             )
+        print("[LISTENING] Audio captured — transcribing…")
     except sr.WaitTimeoutError:
-        print("[LISTEN] Timeout — no speech detected.")
+        print("[LISTENING] Timed out — no speech detected.")
         return ""
 
     # ── Step 2: transcribe via Groq Whisper ───────────────────────────────────
@@ -109,7 +125,7 @@ def listen(groq_client, whisper_model: str,
             )
 
         text = result.text.strip()
-        print(f"[USER] {text}")
+        print(f"[YOU SAID]  \"{text}\"")
         return text
 
     except Exception as exc:

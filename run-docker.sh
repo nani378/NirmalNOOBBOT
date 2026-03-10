@@ -1,7 +1,16 @@
 #!/bin/bash
 # ============================================================
 #  MoodBot — Docker launcher for Linux / Raspberry Pi
-#  Usage:  git clone <repo> && cd NirmalNOOBBOT && bash run-docker.sh
+#
+#  ONE-LINE SETUP (paste into your Raspberry Pi terminal):
+#
+#    git clone https://github.com/nani378/NirmalNOOBBOT.git && \
+#      cd NirmalNOOBBOT && \
+#      echo 'GROQ_API_KEY=your_key_here' > .env && \
+#      bash run-docker.sh
+#
+#  If you already cloned and want to update:
+#    cd NirmalNOOBBOT && git pull && bash run-docker.sh
 # ============================================================
 
 set -e
