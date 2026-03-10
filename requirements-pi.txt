@@ -44,3 +44,6 @@ python-dotenv>=1.0.0
 
 # --- Numerical ---
 numpy>=1.24
+
+# --- Required by fer (uses pkg_resources at import time) ---
+setuptools>=68.0
