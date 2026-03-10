@@ -20,14 +20,20 @@
 # ============================================================
 
 # --- Computer Vision ---
-opencv-python-headless>=4.8.0   # Headless build — lighter on Pi (no GTK deps)
+opencv-python>=4.8.0            # Full build — needed for cv2.imshow with monitor
 
 # --- Emotion Detection ---
 fer>=22.5.1                     # Pulls in tensorflow automatically
 
+# --- Face Geometry ---
+mediapipe>=0.10.9               # Tasks API FaceLandmarker
+
 # --- Speech Recognition ---
 SpeechRecognition>=3.10
 PyAudio>=0.2.14
+
+# --- TTS ---
+pyttsx3>=2.90                   # Uses espeak-ng backend on Pi
 
 # --- Groq AI (LLM + Whisper STT) ---
 groq>=0.9.0

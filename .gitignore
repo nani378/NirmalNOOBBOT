@@ -22,3 +22,9 @@ Thumbs.db
 
 # Temporary audio files created during speech recognition
 *.wav
+
+# Downloaded model (auto-downloaded on first run)
+face_landmarker.task
+
+# Persisted emotion memory samples
+data/
