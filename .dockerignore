@@ -1,0 +1,17 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+*.md
+run.bat
+run.sh
+run-docker.bat
+run-docker.sh
+data/
+.env.example
+mains.py
+feedback_learning.py
+test_speech.py

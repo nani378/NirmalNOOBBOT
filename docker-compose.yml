@@ -1,0 +1,41 @@
+# ============================================================
+#  MoodBot — Docker Compose
+#  Handles camera, microphone, display, and speaker passthrough.
+#
+#  Linux/Pi:   docker-compose up
+#  Windows:    see run-docker.bat (uses Docker Desktop + VcXsrv)
+# ============================================================
+
+services:
+  moodbot:
+    build: .
+    image: moodbot:latest
+    container_name: moodbot
+
+    # Pass .env file for GROQ_API_KEY
+    env_file:
+      - .env
+
+    # X11 display for cv2.imshow window
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - PULSE_SERVER=unix:${XDG_RUNTIME_DIR:-/run/user/1000}/pulse/native
+
+    volumes:
+      # X11 socket for GUI window
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # PulseAudio for speaker output
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}/pulse:${XDG_RUNTIME_DIR:-/run/user/1000}/pulse:rw
+      # Persist emotion memory across container restarts
+      - ./data:/app/data
+
+    # Camera + audio device access
+    devices:
+      - /dev/video0:/dev/video0
+    device_cgroup_rules:
+      - "c 81:* rmw"   # video devices
+      - "c 116:* rmw"  # ALSA sound devices
+
+    # Needed for device access
+    privileged: false
+    network_mode: host

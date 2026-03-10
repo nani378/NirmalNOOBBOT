@@ -2,6 +2,7 @@
 config.py — Central configuration for the AI Emotion Companion.
 All tunable constants are here so you never need to hunt through code.
 """
+import os
 import platform
 
 # ── Platform detection ────────────────────────────────────────────────────────
@@ -9,7 +10,7 @@ IS_PI      = platform.machine() in ("armv7l", "aarch64")   # Raspberry Pi
 IS_WINDOWS = platform.system() == "Windows"
 
 # ── Camera ────────────────────────────────────────────────────────────────────
-CAMERA_INDEX    = 1
+CAMERA_INDEX    = int(os.environ.get("CAMERA_INDEX", 0 if IS_PI else 1))
 # Raspberry Pi: 320×240 for real-time speed.  Laptop: 640×480 for accuracy.
 FRAME_WIDTH     = 320 if IS_PI else 640
 FRAME_HEIGHT    = 240 if IS_PI else 480
