@@ -28,20 +28,31 @@ IS_PI      = platform.machine() in ("armv7l", "aarch64")   # Raspberry Pi
 # Mirrors config.py — defined here to avoid a circular import.
 BT_SPEAKER_ALSA_DEVICE = os.environ.get("BT_SPEAKER_ALSA_DEVICE", "bluealsa")
 
+# ── Mic detection keyword lists ──────────────────────────────────────────────
+# Devices whose names match any WEBCAM keyword are the webcam's built-in mic
+# and must be skipped to avoid audio interference.
+_WEBCAM_KEYWORDS  = ["camera", "webcam", "video", "uvc", "cam"]
+# A device that is NOT a webcam mic but matches any of these is the standalone
+# external USB microphone we want to use.
+_USB_MIC_KEYWORDS = ["usb", "microphone", "mic"]
+
 # ── Mic index caches ──────────────────────────────────────────────────────────
 # Each scan runs only once per process; results are cached in module globals.
-_webcam_mic_index: int | None = None
-_mic_scanned: bool = False
 _pa_mic_index: int | None = None
 _pa_mic_scanned: bool = False
+_sr_mic_index: int | None = None
+_sr_mic_scanned: bool = False
 
 
-def _find_usb_mic_pyaudio() -> int | None:
-    """Enumerate input devices with PyAudio and return the first USB mic index.
+def _find_standalone_usb_mic_pyaudio() -> int | None:
+    """Enumerate input devices with PyAudio and return the standalone USB mic.
 
-    Searches for device names containing 'usb', 'camera', 'webcam', 'video',
-    or 'cam'.  Result is cached — the scan runs only once per process.
-    Returns None when no USB mic is detected or PyAudio is unavailable.
+    Devices whose names contain webcam-related keywords ('camera', 'webcam',
+    'video', 'uvc', 'cam') are explicitly skipped so the webcam's built-in
+    mic is never chosen.  The first remaining device whose name contains 'usb',
+    'microphone', or 'mic' is selected as the external USB microphone.
+    Result is cached — the scan runs only once per process.
+    Returns None when no qualifying mic is found or PyAudio is unavailable.
     """
     global _pa_mic_index, _pa_mic_scanned
     if _pa_mic_scanned:
@@ -54,7 +65,6 @@ def _find_usb_mic_pyaudio() -> int | None:
         _pa_mic_scanned = True
         return None
 
-    keywords = ["usb", "camera", "webcam", "video", "cam", "microphone"]
     pa = pyaudio.PyAudio()
     try:
         count = pa.get_device_count()
@@ -62,51 +72,66 @@ def _find_usb_mic_pyaudio() -> int | None:
         for i in range(count):
             info = pa.get_device_info_by_index(i)
             if info.get("maxInputChannels", 0) > 0:
-                name = info.get("name", "")
-                print(f"        [{i}] {name}")
-                if _pa_mic_index is None and any(k in name.lower() for k in keywords):
-                    print(f"[MIC/PA] ✓ Selected USB mic → [{i}] {name}")
-                    _pa_mic_index = i
+                name     = info.get("name", "")
+                name_lc  = name.lower()
+                is_webcam_mic = any(k in name_lc for k in _WEBCAM_KEYWORDS)
+                is_usb_mic    = any(k in name_lc for k in _USB_MIC_KEYWORDS)
+                if is_webcam_mic:
+                    print(f"        [{i}] {name}  [webcam mic — SKIPPED]")
+                elif is_usb_mic:
+                    print(f"        [{i}] {name}  [standalone USB mic]")
+                    if _pa_mic_index is None:
+                        print(f"[MIC/PA] ✓ Selected standalone USB mic → [{i}] {name}")
+                        _pa_mic_index = i
+                else:
+                    print(f"        [{i}] {name}")
     except Exception as exc:
         print(f"[MIC/PA] Enumeration error: {exc}")
     finally:
         pa.terminate()
 
     if _pa_mic_index is None:
-        print("[MIC/PA] No USB mic found via PyAudio — will use system default")
+        print("[MIC/PA] No standalone USB mic found — will use system default")
     _pa_mic_scanned = True
     return _pa_mic_index
 
 
-def _find_webcam_mic() -> int | None:
-    """Scan microphone list via SpeechRecognition and return the USB mic index.
+def _find_standalone_usb_mic_sr() -> int | None:
+    """Scan microphone list via SpeechRecognition and return the standalone USB mic.
 
-    Searches for names containing 'camera', 'webcam', 'usb', 'video', or 'cam'.
+    Devices whose names contain webcam-related keywords are explicitly skipped
+    to avoid selecting the webcam's built-in microphone.  The first remaining
+    device containing 'usb', 'microphone', or 'mic' in its name is returned.
     Result is cached — the scan only runs on the very first call.
     Returns None if not found, causing sr.Microphone() to use the system default.
     """
-    global _webcam_mic_index, _mic_scanned
-    if _mic_scanned:                          # already scanned — return cached result
-        return _webcam_mic_index
+    global _sr_mic_index, _sr_mic_scanned
+    if _sr_mic_scanned:
+        return _sr_mic_index
 
-    keywords = ["camera", "webcam", "usb", "video", "cam"]
     try:
         names = sr.Microphone.list_microphone_names()
-        print("[MIC] Scanning available microphones:")
+        print("[MIC/SR] Scanning available microphones:")
         for i, name in enumerate(names):
-            print(f"        [{i}] {name}")
-        for i, name in enumerate(names):
-            if any(kw in name.lower() for kw in keywords):
-                print(f"[MIC] ✓ Auto-selected USB mic → [{i}] {name}")
-                _webcam_mic_index = i
-                break
-        if _webcam_mic_index is None:
-            print("[MIC] No USB mic found via SpeechRecognition — using system default")
+            name_lc       = name.lower()
+            is_webcam_mic = any(k in name_lc for k in _WEBCAM_KEYWORDS)
+            is_usb_mic    = any(k in name_lc for k in _USB_MIC_KEYWORDS)
+            if is_webcam_mic:
+                print(f"        [{i}] {name}  [webcam mic — SKIPPED]")
+            elif is_usb_mic:
+                print(f"        [{i}] {name}  [standalone USB mic]")
+                if _sr_mic_index is None:
+                    print(f"[MIC/SR] ✓ Selected standalone USB mic → [{i}] {name}")
+                    _sr_mic_index = i
+            else:
+                print(f"        [{i}] {name}")
+        if _sr_mic_index is None:
+            print("[MIC/SR] No standalone USB mic found — using system default")
     except Exception as exc:
-        print(f"[MIC] Could not enumerate microphones: {exc}")
+        print(f"[MIC/SR] Could not enumerate microphones: {exc}")
 
-    _mic_scanned = True
-    return _webcam_mic_index
+    _sr_mic_scanned = True
+    return _sr_mic_index
 
 
 def speak(text: str, rate: int = 145) -> None:
@@ -172,16 +197,16 @@ def listen(groq_client, whisper_model: str,
     recognizer.dynamic_energy_threshold = True
 
     # ── Step 1: capture microphone audio ─────────────────────────────────────
-    # On Pi: try PyAudio enumeration first (more reliable with USB mics),
-    # then fall back to SpeechRecognition scan, then use system default.
-    if IS_WINDOWS:
-        mic_index = None
-    elif IS_PI:
-        mic_index = _find_usb_mic_pyaudio()
+    # Always select the standalone external USB mic and explicitly skip the
+    # webcam's built-in mic to prevent audio interference.
+    # On Pi: PyAudio enumeration is more reliable; fall back to SR scan.
+    # On Windows / generic Linux: use SpeechRecognition enumeration.
+    if IS_PI:
+        mic_index = _find_standalone_usb_mic_pyaudio()
         if mic_index is None:
-            mic_index = _find_webcam_mic()
+            mic_index = _find_standalone_usb_mic_sr()
     else:
-        mic_index = _find_webcam_mic()
+        mic_index = _find_standalone_usb_mic_sr()
     try:
         with sr.Microphone(device_index=mic_index) as source:
             print("\n[LISTENING] Adjusting for ambient noise…")
