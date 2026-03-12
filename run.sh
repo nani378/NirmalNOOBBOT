@@ -22,7 +22,9 @@ if ! command -v espeak-ng &>/dev/null; then
         libatlas-base-dev libhdf5-dev \
         libgtk-3-dev libopencv-dev \
         portaudio19-dev python3-pyaudio \
-        libjpeg-dev libpng-dev libtiff-dev
+        libjpeg-dev libpng-dev libtiff-dev \
+        libasound2-dev alsa-utils \
+        bluez bluez-alsa-utils
 fi
 
 # Create venv if it doesn't exist

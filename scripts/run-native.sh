@@ -49,6 +49,8 @@ if ! command -v espeak-ng &>/dev/null; then
         libgtk-3-dev \
         portaudio19-dev python3-pyaudio \
         libjpeg-dev libpng-dev \
+        libasound2-dev alsa-utils \
+        bluez bluez-alsa-utils \
         v4l-utils
     echo "[SETUP] System dependencies installed."
 fi
@@ -72,12 +74,20 @@ echo "[CAMERA] Detected video devices:"
 ls /dev/video* 2>/dev/null || echo "  (no /dev/video* found — plug in USB webcam)"
 
 echo ""
-echo "[AUDIO] Available recording devices:"
+echo "[AUDIO] Available recording devices (webcam built-in mics are skipped at runtime):"
 python3 -c "
 import speech_recognition as sr
+_webcam_kw = ['camera', 'webcam', 'video', 'uvc', 'cam']
+_usb_kw    = ['usb', 'microphone', 'mic']
 names = sr.Microphone.list_microphone_names()
 for i, n in enumerate(names):
-    print(f'  [{i}] {n}')
+    lc = n.lower()
+    if any(k in lc for k in _webcam_kw):
+        print(f'  [{i}] {n}  [webcam mic - will be skipped]')
+    elif any(k in lc for k in _usb_kw):
+        print(f'  [{i}] {n}  [standalone USB mic - will be used]')
+    else:
+        print(f'  [{i}] {n}')
 " 2>/dev/null || echo "  (PyAudio not yet ready)"
 
 # ── Launch ────────────────────────────────────────────────────────────────────

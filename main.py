@@ -88,15 +88,20 @@ def probe_devices() -> dict:
         print(f"[PROBE] Webcam error: {exc}")
 
     # ── USB Microphone (PyAudio) ──────────────────────────────────────────────
+    # Look for standalone USB mic; explicitly skip webcam built-in mics.
     try:
         import pyaudio
-        keywords = ["usb", "camera", "webcam", "video", "cam", "microphone"]
+        _webcam_kw = ["camera", "webcam", "video", "uvc", "cam"]
+        _usb_kw    = ["usb", "microphone", "mic"]
         pa = pyaudio.PyAudio()
         try:
             for i in range(pa.get_device_count()):
-                info = pa.get_device_info_by_index(i)
+                info    = pa.get_device_info_by_index(i)
                 if info.get("maxInputChannels", 0) > 0:
-                    if any(k in info.get("name", "").lower() for k in keywords):
+                    name_lc = info.get("name", "").lower()
+                    is_webcam = any(k in name_lc for k in _webcam_kw)
+                    is_usb    = any(k in name_lc for k in _usb_kw)
+                    if not is_webcam and is_usb:
                         results["mic"] = True
                         break
             # Fallback: accept any working default input device
