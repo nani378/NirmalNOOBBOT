@@ -14,7 +14,8 @@ voice_io.py — Cross-platform Text-to-Speech and Speech-to-Text.
     SpeechRecognition's built-in Google engine.
 """
 
-import contextlib
+import ctypes
+import ctypes.util
 import os
 import platform
 import subprocess
@@ -30,32 +31,35 @@ IS_PI      = platform.machine() in ("armv7l", "aarch64")   # Raspberry Pi
 # Mirrors config.py — defined here to avoid a circular import.
 BT_SPEAKER_ALSA_DEVICE = os.environ.get("BT_SPEAKER_ALSA_DEVICE", "bluealsa")
 
-# ── Shutdown control ─────────────────────────────────────────────────────────
+# ── Silence ALSA / JACK noise at C-library level (thread-safe, permanent) ────
+# PyAudio probes every virtual ALSA device on init, producing dozens of
+# harmless 'Unknown PCM' and 'jack server not running' lines.
+# Installing a no-op ALSA error handler + setting JACK_NO_START_SERVER
+# suppresses them all safely without any fd manipulation.
+
+def _init_audio_silence() -> None:
+    os.environ.setdefault("JACK_NO_START_SERVER", "1")
+    if IS_WINDOWS:
+        return
+    try:
+        asound = ctypes.CDLL(
+            ctypes.util.find_library("asound") or "libasound.so.2"
+        )
+        c_handler = ctypes.CFUNCTYPE(
+            None,
+            ctypes.c_char_p, ctypes.c_int,
+            ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p,
+        )
+        asound.snd_lib_error_set_handler(c_handler(0))
+    except Exception:
+        pass
+
+
+_init_audio_silence()
+
+# ── Shutdown control ──────────────────────────────────────────────────────────
 _shutdown = threading.Event()            # set by shutdown() when the app exits
 _tts_proc: "subprocess.Popen | None" = None  # active espeak-ng proc (Pi only)
-
-
-@contextlib.contextmanager
-def _suppress_alsa():
-    """Redirect fd 2 to /dev/null to silence ALSA/JACK probe noise on Linux.
-
-    PyAudio enumerates every virtual ALSA device on init, printing dozens of
-    harmless 'Unknown PCM' lines.  These come from the C library so Python's
-    sys.stderr redirect has no effect — we must dup fd 2 at the OS level.
-    On Windows this is a no-op.
-    """
-    if IS_WINDOWS:
-        yield
-        return
-    fd  = os.open(os.devnull, os.O_WRONLY)
-    old = os.dup(2)
-    os.dup2(fd, 2)
-    os.close(fd)
-    try:
-        yield
-    finally:
-        os.dup2(old, 2)
-        os.close(old)
 
 
 # ── Mic detection keyword lists ──────────────────────────────────────────────
@@ -95,8 +99,7 @@ def _find_standalone_usb_mic_pyaudio() -> int | None:
         _pa_mic_scanned = True
         return None
 
-    with _suppress_alsa():
-        pa = pyaudio.PyAudio()
+    pa = pyaudio.PyAudio()
     try:
         count = pa.get_device_count()
         print("[MIC/PA] Enumerating input devices via PyAudio:")
@@ -141,8 +144,7 @@ def _find_standalone_usb_mic_sr() -> int | None:
         return _sr_mic_index
 
     try:
-        with _suppress_alsa():
-            names = sr.Microphone.list_microphone_names()
+        names = sr.Microphone.list_microphone_names()
         print("[MIC/SR] Scanning available microphones:")
         for i, name in enumerate(names):
             name_lc       = name.lower()
@@ -184,40 +186,52 @@ def speak(text: str, rate: int = 145) -> None:
     elif IS_PI:
         if _shutdown.is_set():
             return
-        # Raspberry Pi — pipe espeak-ng stdout → aplay → Bluetooth speaker.
+        # Raspberry Pi TTS pipeline:
+        #   Primary  : espeak-ng --stdout | paplay  (PulseAudio → BT speaker)
+        #   Fallback : espeak-ng direct             (ALSA default output)
+        #
+        # CRITICAL — pipe ownership:
+        #   After passing espeak_proc.stdout to paplay we MUST close our own
+        #   reference to that pipe.  If we don't, the pipe has two readers
+        #   (our process + paplay); when paplay exits our process still holds
+        #   the read end open, espeak never receives SIGPIPE, fills the 64 KB
+        #   kernel pipe buffer, blocks on write, and espeak_proc.wait()
+        #   deadlocks permanently — silently killing every turn after turn 1.
         global _tts_proc
-        espeak_cmd = ["espeak-ng", "-s", str(rate), "-v", "en+f3", "--stdout", text]
         try:
+            if _shutdown.is_set():
+                return
             espeak_proc = subprocess.Popen(
-                espeak_cmd,
+                ["espeak-ng", "-s", str(rate), "-v", "en+f3", "--stdout", text],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
             )
             _tts_proc = espeak_proc
-            if _shutdown.is_set():
-                espeak_proc.kill()
-                return
-            aplay_result = subprocess.run(
-                ["aplay", "-D", BT_SPEAKER_ALSA_DEVICE, "-q"],
+            player = subprocess.Popen(
+                ["paplay"],           # PulseAudio player → BT speaker
                 stdin=espeak_proc.stdout,
-                stderr=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
+            # Release OUR copy of the pipe read-end so espeak gets SIGPIPE
+            # when paplay exits and can terminate on its own.
+            espeak_proc.stdout.close()
+            player.wait()
             espeak_proc.wait()
-            if aplay_result.returncode != 0:
-                if _shutdown.is_set():
-                    return
-                err = aplay_result.stderr.decode(errors="replace").strip()
-                print(f"[TTS] BT speaker '{BT_SPEAKER_ALSA_DEVICE}' error: {err}")
-                print("[TTS] Falling back to default ALSA output")
-                fallback = subprocess.Popen(
-                    ["espeak-ng", "-s", str(rate), "-v", "en+f3", text],
-                    stderr=subprocess.DEVNULL,
-                )
-                _tts_proc = fallback
-                fallback.wait()
-        except FileNotFoundError as exc:
-            print(f"[TTS] Command not found ({exc}) — install with:")
-            print("  sudo apt install espeak-ng alsa-utils")
+            if player.returncode != 0:
+                raise subprocess.SubprocessError(f"paplay exit {player.returncode}")
+        except (FileNotFoundError, subprocess.SubprocessError):
+            # paplay not installed or failed — fall back to direct ALSA output
+            if _shutdown.is_set():
+                return
+            fallback = subprocess.Popen(
+                ["espeak-ng", "-s", str(rate), "-v", "en+f3", text],
+                stderr=subprocess.DEVNULL,
+            )
+            _tts_proc = fallback
+            fallback.wait()
+        except Exception as exc:
+            print(f"[TTS] Error: {exc}")
         finally:
             _tts_proc = None
     else:
@@ -253,7 +267,7 @@ def listen(groq_client, whisper_model: str,
     if _shutdown.is_set():
         return ""
     try:
-        with _suppress_alsa(), sr.Microphone(device_index=mic_index) as source:
+        with sr.Microphone(device_index=mic_index) as source:
             print("\n[LISTENING] Adjusting for ambient noise…")
             recognizer.adjust_for_ambient_noise(source, duration=0.4)
             print(f"[LISTENING] *** Speak now  (up to {phrase_limit}s) ***")

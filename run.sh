@@ -24,7 +24,8 @@ if ! command -v espeak-ng &>/dev/null; then
         portaudio19-dev python3-pyaudio \
         libjpeg-dev libpng-dev libtiff-dev \
         libasound2-dev alsa-utils \
-        bluez bluez-alsa-utils
+        bluez bluez-alsa-utils \
+        pulseaudio-utils
 fi
 
 # Create venv if it doesn't exist

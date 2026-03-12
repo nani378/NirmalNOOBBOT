@@ -59,7 +59,7 @@ BT_SPEAKER_ALSA_DEVICE = os.environ.get("BT_SPEAKER_ALSA_DEVICE", "bluealsa")
 USB_MIC_ALSA_DEVICE = os.environ.get("USB_MIC_ALSA_DEVICE", "default")
 
 # Max back-and-forth AI turns per emotion session
-CONVERSATION_LIMIT = 10
+CONVERSATION_LIMIT = 6
 
 # ── Display ───────────────────────────────────────────────────────────────────
 WINDOW_NAME = "AI Emotion Companion"

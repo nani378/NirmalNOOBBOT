@@ -51,6 +51,7 @@ if ! command -v espeak-ng &>/dev/null; then
         libjpeg-dev libpng-dev \
         libasound2-dev alsa-utils \
         bluez bluez-alsa-utils \
+        pulseaudio-utils \
         v4l-utils
     echo "[SETUP] System dependencies installed."
 fi
